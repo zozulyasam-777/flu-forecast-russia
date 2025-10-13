@@ -8,6 +8,7 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 
 def load_data(data_dir: str) -> pd.DataFrame:
@@ -60,7 +61,7 @@ def load_data(data_dir: str) -> pd.DataFrame:
 
 def forecast_ets(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
     """
-    Downloads and connects data from CSV files for 2023-2025.
+    predicts using ETS's method.
 
     Args:
         df_hist (pd.DataFrame): Historical data before forecast point
@@ -90,6 +91,53 @@ def forecast_ets(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
     return pd.DataFrame({'date': future_dates, 'rate': forecast_values})
 
 
+def forecast_sarima(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
+    """
+    predicts using SARIMA's method.
+
+    Args:
+        df_hist (pd.DataFrame): histirical mothods
+        steps (int): numb of steps
+
+    Returns:
+        pd.DataFrame: Forecast (future only)
+    """
+    # Prepare times row
+    series = df_hist.set_index('date')['rate'].sort_index()
+    
+    if len(series) < 20:
+        raise ValueError("Too little data(min ~20pt. ) to simulate by SARIMA")
+
+    # SARIMA parameters: (p,d,q) x (P,D,Q,s)
+    # s=52 — weeks data
+    order = (1, 1, 1)      # An unsteady process with a trend
+    seasonal_order = (1, 1, 1, 52)  # Seasonality with a period of 52 weeks
+
+    try:
+        model = SARIMAX(
+            series,
+            order=order,
+            seasonal_order=seasonal_order,
+            enforce_stationarity=False,
+            enforce_invertibility=False
+        )
+        fitted_model = model.fit(disp=False)  # disp=False — do not output logs during training
+        forecast_values = fitted_model.forecast(steps)
+
+        # generate date
+        #last_date = series.index[-1]
+        last_date = series.dropna().index[-1]
+        future_dates = pd.date_range(last_date + pd.Timedelta(weeks=1), periods=steps, freq='W')
+
+        return pd.DataFrame({'date': future_dates, 'rate': forecast_values})
+
+    except Exception as e:
+        print(f"❌ Error wile studies of SARIMA: {e}")
+        last_value = series.iloc[-1]
+        future_dates = pd.date_range(series.index[-1] + pd.Timedelta(weeks=1), periods=steps, freq='W')
+        return pd.DataFrame({'date': future_dates, 'rate': [last_value] * steps})
+
+
 def plot_forecasts(
     df_hist: pd.DataFrame,
     forecasts: dict,  # {'ETS': df1, 'SARIMA': df2, 'Prophet': df3}
@@ -107,7 +155,7 @@ def plot_forecasts(
     if colors is None:
         colors = {
             'ETS': 'green',
-            'SARIMA': 'orange',
+            'SARIMA': 'blue',
             'Prophet': 'purple',
             'XGBoost': 'red'
         }
@@ -147,23 +195,25 @@ def plot_forecasts(
     plt.show()
 
 def main():
+
     DATA_DIR = 'data'
     RESULTS_DIR = 'results'
     OUTPUT_PLOT = os.path.join(RESULTS_DIR, 'flu_trend_with_forecast.png')
 
     try:
+
         os.makedirs(RESULTS_DIR, exist_ok=True)
         print("🔍 Загрузка данных...")
         df = load_data(DATA_DIR)
 
         print("📊 Прогнозирование...")
         forecast_ets_result = forecast_ets(df, steps=3)
-        #forecast_sarima = forecast_sarima(df, steps=3)  
+        forecast_sarima_result = forecast_sarima(df, steps=3)  
 
         # voc of all forecasts
         forecasts = {
             'ETS': forecast_ets_result,
-        #    'SARIMA': forecast_sarima
+            'SARIMA': forecast_sarima_result
         }
 
         print("📈 Forecast for the next 3 weeks:")
