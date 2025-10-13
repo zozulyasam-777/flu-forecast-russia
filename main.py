@@ -60,7 +60,7 @@ def load_data(data_dir: str) -> pd.DataFrame:
 
 def forecast_ets(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
     """
-    Predicts next 'steps' weeks with ETS.
+    Downloads and connects data from CSV files for 2023-2025.
 
     Args:
         df_hist (pd.DataFrame): Historical data before forecast point
@@ -90,76 +90,88 @@ def forecast_ets(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
     return pd.DataFrame({'date': future_dates, 'rate': forecast_values})
 
 
-def plot_with_forecast(df: pd.DataFrame, forecast: pd.DataFrame, output_path: str):
+def plot_forecasts(
+    df_hist: pd.DataFrame,
+    forecasts: dict,  # {'ETS': df1, 'SARIMA': df2, 'Prophet': df3}
+    colors: dict = None,
+    output_path: str = 'results/forecast_comparison.png'
+):
     """
-    Builds a continuous graph of history (gray shades) and forecast (green).
-    The color of the segment depends on the year of its starting point.
+     Builds a continuous graph of history (gray shades) and some forecasts
+    Args:
+        df_hist: historical data
+        forecasts: voc: {'name_model': DataFrame with 'date', 'rate'}
+        colors: voc of colors by model
+        output_path: save path
     """
+    if colors is None:
+        colors = {
+            'ETS': 'green',
+            'SARIMA': 'orange',
+            'Prophet': 'purple',
+            'XGBoost': 'red'
+        }
+
     plt.figure(figsize=(16, 7))
 
-    # Colors by year
-    colors = {
-        2023: '#999999',  # light gray
-        2024: '#555555',  # gray
-        2025: '#000000'   # black
-    }
+    # --- 1. History ---
+    colors_history = {2023: '#999999', 2024: '#555555', 2025: '#000000'}
+    for i in range(len(df_hist) - 1):
+        x0, y0 = df_hist.iloc[i]['date'], df_hist.iloc[i]['rate']
+        x1, y1 = df_hist.iloc[i+1]['date'], df_hist.iloc[i+1]['rate']
+        year = df_hist.iloc[i]['year']
+        plt.plot([x0, x1], [y0, y1], color=colors_history[year], linewidth=2, alpha=0.8)
 
-    # --- 1. Historical data ---
-    for i in range(len(df) - 1):
-        x0, y0 = df.iloc[i]['date'], df.iloc[i]['rate']
-        x1, y1 = df.iloc[i+1]['date'], df.iloc[i+1]['rate']
-        year = df.iloc[i]['year']
-        plt.plot([x0, x1], [y0, y1], color=colors[year], linewidth=2, alpha=0.8)
-
-    # Dots for clarity
+    # Points of history
     for year in [2023, 2024, 2025]:
-        data_year = df[df['year'] == year]
+        data_year = df_hist[df_hist['year'] == year]
         plt.scatter(data_year['date'], data_year['rate'],
-                    s=20, zorder=5, color=colors[year], edgecolor='white', linewidth=0.5)
+                    s=20, zorder=5, color=colors_history[year], edgecolor='white', linewidth=0.5)
 
     # --- 2. Forecast ---
-    plt.plot(forecast['date'], forecast['rate'], color='green', linestyle='--', linewidth=3, label='ETS Forecast')
-    plt.scatter(forecast['date'], forecast['rate'], color='green', s=50, zorder=10)
+    for name, forecast_df in forecasts.items():
+        color = colors.get(name, 'blue')
+        plt.plot(forecast_df['date'], forecast_df['rate'],
+                 color=color, linestyle='--', linewidth=3, label=name)
+        plt.scatter(forecast_df['date'], forecast_df['rate'], color=color, s=50, zorder=10)
 
     # --- Design ---
     plt.title('Dynamics of influenza incidence in the Russian Federation - with a forecast for 3 weeks', fontsize=16)
     plt.xlabel('Date')
-    plt.ylabel('Cases / 10 000')
+    plt.ylabel('Caases / 10 000')
     plt.xticks(rotation=45)
-    plt.legend(title='data type')
+    plt.legend(title='Model')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    print(f"✅ Graph with forecast saved: {output_path}")
     plt.show()
 
-
 def main():
-    """Basic application logic."""
     DATA_DIR = 'data'
     RESULTS_DIR = 'results'
     OUTPUT_PLOT = os.path.join(RESULTS_DIR, 'flu_trend_with_forecast.png')
 
     try:
         os.makedirs(RESULTS_DIR, exist_ok=True)
-        print("🔍 Loading data...")
+        print("🔍 Загрузка данных...")
         df = load_data(DATA_DIR)
 
-        print("📊 Forecast with ETS...")
-        forecast = forecast_ets(df, steps=3)
+        print("📊 Прогнозирование...")
+        forecast_ets_result = forecast_ets(df, steps=3)
+        #forecast_sarima = forecast_sarima(df, steps=3)  
 
-        print("📈 Plotting with forecast...")
-        plot_with_forecast(df, forecast, OUTPUT_PLOT)
+        # voc of all forecasts
+        forecasts = {
+            'ETS': forecast_ets_result,
+        #    'SARIMA': forecast_sarima
+        }
 
-        # Displaying the Forecast
-        print("\n🔮 Forecast for the next 3 weeks:")
-        for _, row in forecast.iterrows():
-            print(f"  {row['date'].strftime('%Y-%m-%d')}: {row['rate']:.2f} cases / 10 th.")
+        print("📈 Forecast for the next 3 weeks:")
+        plot_forecasts(df, forecasts, output_path=OUTPUT_PLOT)
 
         print("✅ Analysis completed successfully!")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Errors: {e}")
         raise
 
 
