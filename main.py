@@ -191,6 +191,11 @@ def plot_forecasts(
     plt.legend(title='Model')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
+        # --- Подпись снизу ---
+    plt.figtext(0.5, 0.01
+        ,"If you're surprised by the sharp drop on January 1, it's the number of medical visits, not the number of cases!"
+        ,ha="center", fontsize=9, style="italic", alpha=0.7, wrap=True
+    )
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.show()
 
