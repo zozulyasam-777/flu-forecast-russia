@@ -7,8 +7,10 @@ Author: Sam Zozulya
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
+from prophet import Prophet
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.statespace.sarimax import SARIMAX
+
 
 
 def load_data(data_dir: str) -> pd.DataFrame:
@@ -138,6 +140,47 @@ def forecast_sarima(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
         return pd.DataFrame({'date': future_dates, 'rate': [last_value] * steps})
 
 
+
+def forecast_prophet(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
+    """
+    predicts using Prophet's method.
+
+    Args:
+        df_hist (pd.DataFrame): histirical mothods
+        steps (int): numb of steps
+
+    Returns:
+        ppd.DataFrame: Forecast (future only)
+    """
+    # Prepare data for Prophet
+    df_prophet = df_hist[['date', 'rate']].rename(columns={'date': 'ds', 'rate': 'y'})
+
+    if len(df_prophet) < 10:
+        raise ValueError("Too little data for Prophet")
+
+    # Create and study model
+    model = Prophet(
+        yearly_seasonality=True,
+        weekly_seasonality=False,
+        daily_seasonality=False,
+        changepoint_prior_scale=0.05,
+        seasonality_mode='additive'
+    )
+    model.fit(df_prophet)
+
+    # Creating a time range for the forecast
+    future = model.make_future_dataframe(periods=steps, freq='W')
+    forecast = model.predict(future)
+
+    # Take only the forecast lines
+    forecast_period = forecast.iloc[-steps:]
+
+    return pd.DataFrame({
+        'date': forecast_period['ds'].values,
+        'rate': forecast_period['yhat'].values
+    })
+
+
 def plot_forecasts(
     df_hist: pd.DataFrame,
     forecasts: dict,  # {'ETS': df1, 'SARIMA': df2, 'Prophet': df3}
@@ -191,7 +234,6 @@ def plot_forecasts(
     plt.legend(title='Model')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-        # --- Подпись снизу ---
     plt.figtext(0.5, 0.01
         ,"If you're surprised by the sharp drop on January 1, it's the number of medical visits, not the number of cases!"
         ,ha="center", fontsize=9, style="italic", alpha=0.7, wrap=True
@@ -200,28 +242,27 @@ def plot_forecasts(
     plt.show()
 
 def main():
-
     DATA_DIR = 'data'
     RESULTS_DIR = 'results'
-    OUTPUT_PLOT = os.path.join(RESULTS_DIR, 'flu_trend_with_forecast.png')
+    OUTPUT_PLOT = os.path.join(RESULTS_DIR, 'forecast_comparison.png')
 
     try:
-
         os.makedirs(RESULTS_DIR, exist_ok=True)
-        print("🔍 Загрузка данных...")
+        print("🔍 Load data...")
         df = load_data(DATA_DIR)
 
-        print("📊 Прогнозирование...")
-        forecast_ets_result = forecast_ets(df, steps=3)
-        forecast_sarima_result = forecast_sarima(df, steps=3)  
+        print("📊 Forecast...")
+        pred_ets = forecast_ets(df, steps=3)
+        pred_sarima = forecast_sarima(df, steps=3)
+        pred_prophet = forecast_prophet(df, steps=3)
 
-        # voc of all forecasts
         forecasts = {
-            'ETS': forecast_ets_result,
-            'SARIMA': forecast_sarima_result
+            'ETS': pred_ets,
+            'SARIMA': pred_sarima,
+            'Prophet': pred_prophet
         }
 
-        print("📈 Forecast for the next 3 weeks:")
+        print("📈 Forecast for the next 3 weeks...")
         plot_forecasts(df, forecasts, output_path=OUTPUT_PLOT)
 
         print("✅ Analysis completed successfully!")
