@@ -75,21 +75,29 @@ def forecast_ets(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
     if len(series) < 10:
         raise ValueError("Too little data to simulate")
 
-    model = ExponentialSmoothing(
-        series,
-        trend='add',
-        damped_trend=True,
-        seasonal='add',
-        seasonal_periods=52
-    ).fit()
+    MIN_SEASONAL_LENGTH = 104 # Threshold: minimum 2 full seasons (104 weeks) for seasonal ETS
+    # Checking if there is enough data for the seasonal model
+    if len(series) >= MIN_SEASONAL_LENGTH:
+        model = ExponentialSmoothing(
+            series,
+            trend='add',
+            damped_trend=True,
+            seasonal='add',
+            seasonal_periods=52
+        ).fit()
+    else:
+        print(f"⚠️ Too little data to simulate with  seasonal model ETS ({len(series)} points). disabling accessibility.")
+        model = ExponentialSmoothing(
+            series,
+            trend='add',
+            damped_trend=True,
+            seasonal=None
+        ).fit()
 
     forecast_values = model.forecast(steps)
-
     last_date = series.index[-1]
     future_dates = pd.date_range(last_date + pd.Timedelta(weeks=1), periods=steps, freq='W')
-
     return pd.DataFrame({'date': future_dates, 'rate': forecast_values})
-
 
 def forecast_sarima(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
     """
@@ -111,9 +119,11 @@ def forecast_sarima(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
     # SARIMA parameters: (p,d,q) x (P,D,Q,s)
     # s=52 — weeks data
     order = (1, 1, 1)      # An unsteady process with a trend
-    seasonal_order = (1, 1, 1, 52)  # Seasonality with a period of 52 weeks
+    # Threshold: at least two full seasonsа (52 * 2 = 104 weeks)
+    MIN_SEASONAL_LENGTH = 104
 
-    try:
+    if len(series) >= MIN_SEASONAL_LENGTH:
+        seasonal_order = (1, 1, 1, 52)  # Seasonality with a period of 52 weeks
         model = SARIMAX(
             series,
             order=order,
@@ -121,6 +131,12 @@ def forecast_sarima(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
             enforce_stationarity=False,
             enforce_invertibility=False
         )
+    else:
+        model = SARIMAX(series, order=order)
+        print(f"⚠️ There is not enough data for seasonal SARIMA ({len(series)} weeks). use common model.")
+
+
+    try:
         fitted_model = model.fit(disp=False)  # disp=False — do not output logs during training
         forecast_values = fitted_model.forecast(steps)
 
@@ -133,14 +149,14 @@ def forecast_sarima(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
 
     except Exception as e:
         print(f"❌ Error wile studies of SARIMA: {e}")
-        last_value = series.iloc[-1]
-        future_dates = pd.date_range(series.index[-1] + pd.Timedelta(weeks=1), periods=steps, freq='W')
+        last_value = series.dropna().iloc[-1] # a .dropna for full NaN value
+        future_dates = pd.date_range(series.dropna().index[-1] + pd.Timedelta(weeks=1), periods=steps, freq='W')
         return pd.DataFrame({'date': future_dates, 'rate': [last_value] * steps})
 
 
 def plot_forecasts(
     df_hist: pd.DataFrame,
-    forecasts: dict,  # {'ETS': df1, 'SARIMA': df2, 'Prophet': df3}
+    forecasts: dict,
     colors: dict = None,
     output_path: str = 'results/forecast_comparison.png'
 ):
@@ -177,21 +193,38 @@ def plot_forecasts(
                     s=20, zorder=5, color=colors_history[year], edgecolor='white', linewidth=0.5)
 
     # --- 2. Forecast ---
+    main_models = ['ETS', 'SARIMA', 'Prophet', 'XGBoost']
     for name, forecast_df in forecasts.items():
-        color = colors.get(name, 'blue')
+        color = colors.get(name.split(' (')[0], 'blue')
+        linestyle = '--' if 'Backtest' not in name else '-.'
+        linewidth = 3 if 'Backtest' not in name else 2
+        alpha = 0.9 if 'Backtest' not in name else 0.7
+
+        if 'ETS' in name:
+            marker = '.'
+            markersize = 10
+        elif 'SARIMA' in name:
+            marker = 'D'
+            markersize = 6
+        else:
+            marker = 'o' 
+            markersize = 6
+        
+        label = name if name in main_models else None
+        
         plt.plot(forecast_df['date'], forecast_df['rate'],
                  color=color, linestyle='--', linewidth=3, label=name)
-        plt.scatter(forecast_df['date'], forecast_df['rate'], color=color, s=50, zorder=10)
+        plt.scatter(forecast_df['date'], forecast_df['rate'],
+                    color=color, s=markersize*10, zorder=10, marker=marker, edgecolors='white', linewidth=0.5)
 
     # --- Design ---
     plt.title('Dynamics of influenza incidence in the Russian Federation - with a forecast for 3 weeks', fontsize=16)
     plt.xlabel('Date')
     plt.ylabel('Caases / 10 000')
     plt.xticks(rotation=45)
-    plt.legend(title='Model')
+    plt.legend(title='Model', loc='upper left')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-        # --- Подпись снизу ---
     plt.figtext(0.5, 0.01
         ,"If you're surprised by the sharp drop on January 1, it's the number of medical visits, not the number of cases!"
         ,ha="center", fontsize=9, style="italic", alpha=0.7, wrap=True
@@ -203,25 +236,33 @@ def main():
 
     DATA_DIR = 'data'
     RESULTS_DIR = 'results'
-    OUTPUT_PLOT = os.path.join(RESULTS_DIR, 'flu_trend_with_forecast.png')
+    OUTPUT_PLOT = os.path.join(RESULTS_DIR, 'forecast_comparison.png')
 
     try:
 
         os.makedirs(RESULTS_DIR, exist_ok=True)
-        print("🔍 Загрузка данных...")
+        print("🔍 Load data...")
         df = load_data(DATA_DIR)
 
-        print("📊 Прогнозирование...")
-        forecast_ets_result = forecast_ets(df, steps=3)
-        forecast_sarima_result = forecast_sarima(df, steps=3)  
+        print("📊 General forecast for future")
+        pred_ets_now = forecast_ets(df, steps=3)
+        pred_sarima_now = forecast_sarima(df, steps=3) 
 
+        # Backtesting: forecast in The PAST
+        cutoff_2024 = pd.Timestamp('2024-10-01')
+        train_2024 = df[df['date'] < cutoff_2024]
+        pred_ets_2024 = forecast_ets(train_2024, steps=3)
+        pred_sarima_2024 = forecast_sarima(train_2024, steps=3)    
+        
         # voc of all forecasts
         forecasts = {
-            'ETS': forecast_ets_result,
-            'SARIMA': forecast_sarima_result
+            'ETS': pred_ets_now
+            ,'SARIMA': pred_sarima_now
+            ,'SARIMA (Backtest 2024)': pred_sarima_2024
+            ,'ETS (Backtest 2024)': pred_ets_2024            
         }
 
-        print("📈 Forecast for the next 3 weeks:")
+        print("📈 Show Forecast:")
         plot_forecasts(df, forecasts, output_path=OUTPUT_PLOT)
 
         print("✅ Analysis completed successfully!")
