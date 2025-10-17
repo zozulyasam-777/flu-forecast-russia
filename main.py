@@ -275,7 +275,7 @@ def main():
         print("📊 General forecast for future")
         pred_ets_now = forecast_ets(df, steps=3)
         pred_sarima_now = forecast_sarima(df, steps=3) 
-        pred_prophet = forecast_prophet(df, steps=3
+        pred_prophet = forecast_prophet(df, steps=3)
 
         # Backtesting: forecast in The PAST
         cutoff_2024 = pd.Timestamp('2024-10-01')
