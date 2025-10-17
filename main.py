@@ -7,9 +7,9 @@ Author: Sam Zozulya
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
+from prophet import Prophet
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-
 
 def load_data(data_dir: str) -> pd.DataFrame:
     """
@@ -21,6 +21,7 @@ def load_data(data_dir: str) -> pd.DataFrame:
     Returns:
         pd.DataFrame: United DataFrame with columns 'date', 'rate', 'year'
     """
+
     files = {
         2023: 'stat_flu_2023.csv',
         2024: 'stat_flu_2024.csv',
@@ -36,19 +37,13 @@ def load_data(data_dir: str) -> pd.DataFrame:
             print(f"❌ File not found: {path}")
             continue
 
-        # Reading: week, rate_per_10k
-        df = pd.read_csv(path, header=None, names=['week', 'rate'])
+        df = pd.read_csv(path, header=None, names=['week', 'rate']) # Reading: week, rate_per_10k
         df['year'] = year
-
-        # Type check
         df['week'] = pd.to_numeric(df['week'], errors='coerce')
         df['rate'] = pd.to_numeric(df['rate'], errors='coerce')
         df.dropna(inplace=True)
         df = df[(df['week'] >= 1) & (df['week'] <= 53)]
-
-        # Convert week to date
-        df['date'] = pd.to_datetime(f"{year}-01-01") + pd.to_timedelta((df['week'] - 1) * 7, unit='D')
-
+        df['date'] = pd.to_datetime(f"{year}-01-01") + pd.to_timedelta((df['week'] - 1) * 7, unit='D') # Convert week to date
         df_list.append(df[['date', 'rate', 'year']])
 
     if not df_list:
@@ -70,6 +65,7 @@ def forecast_ets(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
     Returns:
         pd.DataFrame: Forecast (future only)
     """
+
     series = df_hist.set_index('date')['rate'].sort_index()
 
     if len(series) < 10:
@@ -111,6 +107,7 @@ def forecast_sarima(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
         pd.DataFrame: Forecast (future only)
     """
     # Prepare times row
+
     series = df_hist.set_index('date')['rate'].sort_index()
     
     if len(series) < 20:
@@ -135,16 +132,13 @@ def forecast_sarima(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
         model = SARIMAX(series, order=order)
         print(f"⚠️ There is not enough data for seasonal SARIMA ({len(series)} weeks). use common model.")
 
-
     try:
         fitted_model = model.fit(disp=False)  # disp=False — do not output logs during training
         forecast_values = fitted_model.forecast(steps)
-
         # generate date
         #last_date = series.index[-1]
         last_date = series.dropna().index[-1]
         future_dates = pd.date_range(last_date + pd.Timedelta(weeks=1), periods=steps, freq='W')
-
         return pd.DataFrame({'date': future_dates, 'rate': forecast_values})
 
     except Exception as e:
@@ -152,6 +146,45 @@ def forecast_sarima(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
         last_value = series.dropna().iloc[-1] # a .dropna for full NaN value
         future_dates = pd.date_range(series.dropna().index[-1] + pd.Timedelta(weeks=1), periods=steps, freq='W')
         return pd.DataFrame({'date': future_dates, 'rate': [last_value] * steps})
+
+def forecast_prophet(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
+    """
+    predicts using Prophet's method.
+
+    Args:
+        df_hist (pd.DataFrame): histirical mothods
+        steps (int): numb of steps
+
+    Returns:
+        ppd.DataFrame: Forecast (future only)
+    """
+    # Prepare data for Prophet
+    df_prophet = df_hist[['date', 'rate']].rename(columns={'date': 'ds', 'rate': 'y'})
+
+    if len(df_prophet) < 10:
+        raise ValueError("Too little data for Prophet")
+
+    # Create and study model
+    model = Prophet(
+        yearly_seasonality=True,
+        weekly_seasonality=False,
+        daily_seasonality=False,
+        changepoint_prior_scale=0.05,
+        seasonality_mode='additive'
+    )
+    model.fit(df_prophet)
+
+    # Creating a time range for the forecast
+    future = model.make_future_dataframe(periods=steps, freq='W')
+    forecast = model.predict(future)
+
+    # Take only the forecast lines
+    forecast_period = forecast.iloc[-steps:]
+
+    return pd.DataFrame({
+        'date': forecast_period['ds'].values,
+        'rate': forecast_period['yhat'].values
+    })
 
 
 def plot_forecasts(
@@ -168,6 +201,7 @@ def plot_forecasts(
         colors: voc of colors by model
         output_path: save path
     """
+
     if colors is None:
         colors = {
             'ETS': 'green',
@@ -178,7 +212,6 @@ def plot_forecasts(
 
     plt.figure(figsize=(16, 7))
 
-    # --- 1. History ---
     colors_history = {2023: '#999999', 2024: '#555555', 2025: '#000000'}
     for i in range(len(df_hist) - 1):
         x0, y0 = df_hist.iloc[i]['date'], df_hist.iloc[i]['rate']
@@ -186,13 +219,11 @@ def plot_forecasts(
         year = df_hist.iloc[i]['year']
         plt.plot([x0, x1], [y0, y1], color=colors_history[year], linewidth=2, alpha=0.8)
 
-    # Points of history
     for year in [2023, 2024, 2025]:
         data_year = df_hist[df_hist['year'] == year]
         plt.scatter(data_year['date'], data_year['rate'],
                     s=20, zorder=5, color=colors_history[year], edgecolor='white', linewidth=0.5)
 
-    # --- 2. Forecast ---
     main_models = ['ETS', 'SARIMA', 'Prophet', 'XGBoost']
     for name, forecast_df in forecasts.items():
         color = colors.get(name.split(' (')[0], 'blue')
@@ -217,7 +248,6 @@ def plot_forecasts(
         plt.scatter(forecast_df['date'], forecast_df['rate'],
                     color=color, s=markersize*10, zorder=10, marker=marker, edgecolors='white', linewidth=0.5)
 
-    # --- Design ---
     plt.title('Dynamics of influenza incidence in the Russian Federation - with a forecast for 3 weeks', fontsize=16)
     plt.xlabel('Date')
     plt.ylabel('Caases / 10 000')
@@ -233,13 +263,11 @@ def plot_forecasts(
     plt.show()
 
 def main():
-
     DATA_DIR = 'data'
     RESULTS_DIR = 'results'
     OUTPUT_PLOT = os.path.join(RESULTS_DIR, 'forecast_comparison.png')
 
     try:
-
         os.makedirs(RESULTS_DIR, exist_ok=True)
         print("🔍 Load data...")
         df = load_data(DATA_DIR)
@@ -247,6 +275,7 @@ def main():
         print("📊 General forecast for future")
         pred_ets_now = forecast_ets(df, steps=3)
         pred_sarima_now = forecast_sarima(df, steps=3) 
+        pred_prophet = forecast_prophet(df, steps=3
 
         # Backtesting: forecast in The PAST
         cutoff_2024 = pd.Timestamp('2024-10-01')
@@ -259,17 +288,16 @@ def main():
             'ETS': pred_ets_now
             ,'SARIMA': pred_sarima_now
             ,'SARIMA (Backtest 2024)': pred_sarima_2024
-            ,'ETS (Backtest 2024)': pred_ets_2024            
+            ,'ETS (Backtest 2024)': pred_ets_2024  
+            ,'Prophet': pred_prophet
         }
 
         print("📈 Show Forecast:")
         plot_forecasts(df, forecasts, output_path=OUTPUT_PLOT)
-
         print("✅ Analysis completed successfully!")
     except Exception as e:
         print(f"❌ Errors: {e}")
         raise
-
 
 if __name__ == '__main__':
     main()
