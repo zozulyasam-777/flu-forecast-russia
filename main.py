@@ -116,7 +116,7 @@ def forecast_sarima(df_hist: pd.DataFrame, steps: int = 3) -> pd.DataFrame:
     # SARIMA parameters: (p,d,q) x (P,D,Q,s)
     # s=52 — weeks data
     order = (1, 1, 1)      # An unsteady process with a trend
-    # Threshold: at least two full seasonsа (52 * 2 = 104 weeks)
+    # Threshold: at least two full seasons (52 * 2 = 104 weeks)
     MIN_SEASONAL_LENGTH = 104
 
     if len(series) >= MIN_SEASONAL_LENGTH:
@@ -206,8 +206,7 @@ def plot_forecasts(
         colors = {
             'ETS': 'green',
             'SARIMA': 'blue',
-            'Prophet': 'purple',
-            'XGBoost': 'red'
+            'Prophet': 'purple'
         }
 
     plt.figure(figsize=(16, 7))
@@ -224,7 +223,7 @@ def plot_forecasts(
         plt.scatter(data_year['date'], data_year['rate'],
                     s=20, zorder=5, color=colors_history[year], edgecolor='white', linewidth=0.5)
 
-    main_models = ['ETS', 'SARIMA', 'Prophet', 'XGBoost']
+    main_models = ['ETS', 'SARIMA', 'Prophet']
     for name, forecast_df in forecasts.items():
         color = colors.get(name.split(' (')[0], 'blue')
         linestyle = '--' if 'Backtest' not in name else '-.'
@@ -276,8 +275,7 @@ def plot_forecast_zoom(
         colors = {
             'ETS': 'green',
             'SARIMA': 'blue',
-            'Prophet': 'purple',
-            'XGBoost': 'red'
+            'Prophet': 'purple'
         }
 
     plt.figure(figsize=(12, 6))
@@ -301,11 +299,10 @@ def plot_forecast_zoom(
 
     if len(recent_history) > 0:
         plt.plot(recent_history['date'], recent_history['rate'],
-                 color='black', linewidth=2, alpha=0.8, label='История')
+                 color='black', linewidth=2, alpha=0.8, label='History')
         plt.scatter(recent_history['date'], recent_history['rate'],
                     color='black', s=30, zorder=5, edgecolor='white', linewidth=0.5)
 
-    # Прогнозы
     for name, forecast_df in filtered_forecasts.items():
         color = colors.get(name.split(' (')[0], 'gray')
         linestyle = '--' if 'Backtest' not in name else '-.'
@@ -316,29 +313,20 @@ def plot_forecast_zoom(
         plt.scatter(forecast_df['date'], forecast_df['rate'],
                     color=color, s=60, zorder=10, marker=marker, edgecolors='white', linewidth=0.6)
 
-    # --- 5. Устанавливаем жёсткие границы осей ---
     plt.xlim(x_min, x_max)
-    # Можно добавить небольшой запас по Y:
     all_rates = [val for _, df in filtered_forecasts.items() for val in df['rate']]
     if all_rates:
         y_min = min(all_rates) * 0.95
         y_max = max(all_rates) * 1.05
         plt.ylim(y_min, y_max)
 
-    # --- 6. Оформление ---
-    plt.title('Детализация: июль 2025 – январь 2026', fontsize=14)
-    plt.xlabel('Дата')
-    plt.ylabel('Случаи / 10 000')
+    plt.title('Details: july 2025 – january 2026', fontsize=14)
+    plt.xlabel('Date')
+    plt.ylabel('Cases / 10 000')
     plt.xticks(rotation=45)
-    plt.legend(title='Модель', loc='upper left')
+    plt.legend(title='Model', loc='upper left')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-
-    # Подпись
-    plt.figtext(0.5, 0.01,
-                "Данные получены на основании обращений в медицинские учреждения",
-                ha="center", fontsize=9, style="italic", alpha=0.7, wrap=True)
-
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.show()
 
@@ -376,7 +364,7 @@ def main():
         print("📈 Show Forecast:")
         plot_forecasts(df, forecasts, output_path=OUTPUT_PLOT)
 
-        print("🔍 Построение детализированного графика...")
+        print("🔍 the zoom forecast...")
         plot_forecast_zoom(df, forecasts, output_path=os.path.join(RESULTS_DIR, 'forecast_zoom.png'))
         
         print("✅ Analysis completed successfully!")
